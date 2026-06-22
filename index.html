@@ -344,9 +344,9 @@ tr:hover td{background:var(--surface2);}
   <!-- HIERARCHY REPORT TAB -->
   <div id="tab-hrc" class="tab-content">
     <div class="pe-filter-bar">
-      <div class="pe-filter-group"><label>Month</label><select id="hrc-f-month" onchange="buildHRC()"></select></div>
+      <div class="pe-filter-group"><label>Month</label><select id="hrc-f-month" onchange="onHRCMonthChange()"></select></div>
       <div class="pe-filter-group"><label>Week</label>
-        <select id="hrc-f-week" onchange="buildHRC()">
+        <select id="hrc-f-week" onchange="onHRCWeekChange()">
           <option value="">All Weeks</option>
           <option value="1">Week 1 (1–7)</option>
           <option value="2">Week 2 (8–14)</option>
@@ -355,6 +355,7 @@ tr:hover td{background:var(--surface2);}
           <option value="5">Week 5 (29–end)</option>
         </select>
       </div>
+      <div class="pe-filter-group"><label>Date (daily)</label><select id="hrc-f-date" onchange="onHRCDateChange()"><option value="">All Days</option></select></div>
       <div class="pe-fdivider"></div>
       <div class="pe-filter-actions">
         <span class="spacer"></span>
@@ -3341,10 +3342,39 @@ function populateHRCFilters(){
     keys.forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=months[k].toLocaleDateString('en-IN',{month:'long',year:'numeric'});msel.appendChild(o);});
     if(cur)msel.value=cur; else if(keys.length)msel.value=keys[0];
   }
+  populateHRCDates();
 }
+
+// Fill the Date dropdown with the days present in attendance for the selected month
+function populateHRCDates(){
+  const dsel=document.getElementById('hrc-f-date');if(!dsel)return;
+  const cur=dsel.value;
+  const monthVal=(document.getElementById('hrc-f-month')||{}).value||'';
+  dsel.innerHTML='<option value="">All Days</option>';
+  if(!monthVal){dsel.disabled=true;return;}
+  dsel.disabled=false;
+  const [yy,mm]=monthVal.split('-').map(Number);
+  const present=new Set();
+  D.att.r.forEach(x=>{const d=parseDate(v(x,ATT_COL.DATE));if(d&&d.getFullYear()===yy&&d.getMonth()===mm-1)present.add(d.getDate());});
+  const wd=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  [...present].sort((a,b)=>a-b).forEach(dd=>{
+    const dt=new Date(yy,mm-1,dd);
+    const o=document.createElement('option');o.value=String(dd);
+    o.textContent=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+' · '+wd[dt.getDay()];
+    dsel.appendChild(o);
+  });
+  if(cur&&present.has(Number(cur)))dsel.value=cur; else dsel.value='';
+}
+
+function onHRCMonthChange(){ populateHRCDates(); buildHRC(); }
+// Week and Date are mutually exclusive (a single day overrides the week range)
+function onHRCWeekChange(){ const d=document.getElementById('hrc-f-date'); if(d&&document.getElementById('hrc-f-week').value)d.value=''; buildHRC(); }
+function onHRCDateChange(){ const w=document.getElementById('hrc-f-week'); if(w&&document.getElementById('hrc-f-date').value)w.value=''; buildHRC(); }
 function clearHRCFilters(){
   const m=document.getElementById('hrc-f-month');if(m&&m.options.length)m.selectedIndex=Math.min(1,m.options.length-1);
   const w=document.getElementById('hrc-f-week');if(w)w.value='';
+  populateHRCDates();
+  const dd=document.getElementById('hrc-f-date');if(dd)dd.value='';
   _hrcExpanded.clear();
   buildHRC();
 }
@@ -3352,6 +3382,7 @@ function clearHRCFilters(){
 function buildHRC(){
   const monthVal=(document.getElementById('hrc-f-month')||{}).value||'';
   const weekVal=(document.getElementById('hrc-f-week')||{}).value||'';
+  const dateVal=(document.getElementById('hrc-f-date')||{}).value||'';
   const head=document.getElementById('hrc-head'),body=document.getElementById('hrc-body');
   if(!head||!body)return;
 
@@ -3361,7 +3392,8 @@ function buildHRC(){
     [yy,mm]=monthVal.split('-').map(Number);
     const daysInMonth=new Date(yy,mm,0).getDate();
     dayStart=1;dayEnd=daysInMonth;
-    if(weekVal){const w=Number(weekVal);dayStart=(w-1)*7+1;dayEnd=Math.min(w*7,daysInMonth);}
+    if(dateVal){const dd=Number(dateVal);dayStart=dd;dayEnd=dd;}        // single day overrides week
+    else if(weekVal){const w=Number(weekVal);dayStart=(w-1)*7+1;dayEnd=Math.min(w*7,daysInMonth);}
   }
 
   // Per-project attendance stats in window
