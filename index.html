@@ -220,7 +220,7 @@ tr:hover td{background:var(--surface2);}
 
 <div id="login-overlay" class="hidden">
   <div class="login-card">
-    <div class="login-logo"><i class="ti ti-bolt"></i> Ops Dashboard</div>
+    <div class="login-logo"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcToL7ghMGlVSZZldEAR63B8XCpsOUoKx00ATeQzw6OJACIfjw61nHrhpOQ9&s=10" alt="logo" style="height:28px;width:auto;border-radius:6px;"/> Ops Dashboard</div>
     <div class="login-sub">Sign in to continue</div>
     <div class="login-field"><label>Email</label>
       <input type="text" id="login-email" placeholder="you@example.com" autocomplete="username"/></div>
@@ -233,7 +233,7 @@ tr:hover td{background:var(--surface2);}
 
 <div class="topbar">
   <div style="display:flex;align-items:center;gap:10px;">
-    <div class="logo"><i class="ti ti-bolt"></i> Ops Dashboard</div>
+    <div class="logo"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcToL7ghMGlVSZZldEAR63B8XCpsOUoKx00ATeQzw6OJACIfjw61nHrhpOQ9&s=10" alt="logo" style="height:24px;width:auto;border-radius:5px;"/> Ops Dashboard</div>
     <span style="font-size:11px;color:var(--muted);">PE · Attendance · TBT · DPR · Projects</span>
   </div>
   <div class="topbar-right">
@@ -430,6 +430,7 @@ tr:hover td{background:var(--surface2);}
       <div class="card" style="padding:0;overflow:hidden;">
         <div class="table-wrap pmr-wrap"><table class="pmr-table"><thead id="pemr-head"></thead><tbody id="pemr-body"></tbody></table></div>
       </div>
+      <div id="pemr-pe-summary"></div>
     </div>
   </div>
 
@@ -708,22 +709,27 @@ function doLogin(){
 
   const h=D.cred.h, r=D.cred.r;
   if(!r.length){errEl.textContent='Credentials sheet not loaded — check that the "Cred" sheet is shared (Anyone with link → Viewer).';return;}
-  const EI=ci(h,'Email','mail','mailid'), PI=ci(h,'Password','pass'),
-        AI=ci(h,'Accesstype','access','role','type'), NI=ci(h,'Name','employeename','username','fullname');
+  // Cred sheet fixed layout: A=Name(0) B=User Email(1) C=Password(2) D=Access Type(3).
+  // Use those positions, but let header detection override if the sheet is arranged differently.
+  const _ix=(def,...kw)=>{const i=ci(h,...kw);return i>=0?i:def;};
+  const NI=_ix(0,'Name','employeename','fullname','username');
+  const EI=_ix(1,'UserEmail','Email','mailid','mail');
+  const PI=_ix(2,'Password','pass');
+  const AI=_ix(3,'Accesstype','access','role','type');
 
   const row=r.find(x=>v(x,EI).toLowerCase()===email);
   if(!row){errEl.textContent='No account found for this email.';return;}
   if(v(row,PI)!==pass){errEl.textContent='Incorrect password.';return;}
 
   const role=normRole(v(row,AI));
-  let name=NI>=0?v(row,NI):'';
+  let name=v(row,NI);
   if(!name && role==='pe'){ // fall back to PE Master email→name
     const peEI=ci(D.pe.h,'Mailid','email','mail'), peNI=ci(D.pe.h,'EmployeeName','name');
     const peRow=D.pe.r.find(x=>v(x,peEI).toLowerCase()===email);
     if(peRow)name=v(peRow,peNI);
   }
   if(role!=='admin' && !name){
-    errEl.textContent='No "Name" set for this account in the Cred sheet. Add a Name column matching the Lead Tracker.';return;
+    errEl.textContent='No "Name" found in column A of the Cred sheet for this account.';return;
   }
 
   _user={email,role,name};
@@ -747,17 +753,24 @@ function applyUserScope(){
   if(_leadAll===null)_leadAll=D.lead.r;
   if(_peAll===null)_peAll=D.pe.r;
   let lead=_leadAll, pe=_peAll;
+  const eq=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
   if(_user && _user.role!=='admin'){
     const nm=_user.name;
     if(_user.role==='cluster'){
-      lead=_leadAll.filter(x=>lv(x,LEAD_COL.CLUSTER)===nm);
-      const i=ci(D.pe.h,'Clusterhead','cluster'); pe=_peAll.filter(x=>v(x,i)===nm);
+      // Lead Tracker: Cluster Head = column AE (index 30)
+      lead=_leadAll.filter(x=>eq(lv(x,LEAD_COL.CLUSTER),nm));
+      const i=ci(D.pe.h,'Clusterhead','cluster'); pe=_peAll.filter(x=>eq(v(x,i),nm));
     }else if(_user.role==='citymgr'){
-      lead=_leadAll.filter(x=>lv(x,LEAD_COL.CITYMGR)===nm);
-      const i=ci(D.pe.h,'CityManager','citymanager','city'); pe=_peAll.filter(x=>v(x,i)===nm);
+      // Lead Tracker: City Manager = column AG (index 32)
+      lead=_leadAll.filter(x=>eq(lv(x,LEAD_COL.CITYMGR),nm));
+      const i=ci(D.pe.h,'CityManager','citymanager','city'); pe=_peAll.filter(x=>eq(v(x,i),nm));
     }else if(_user.role==='pe'){
-      lead=_leadAll.filter(x=>lv(x,LEAD_COL.PE)===nm);
-      const i=ci(D.pe.h,'EmployeeName','name'); pe=_peAll.filter(x=>v(x,i)===nm);
+      lead=_leadAll.filter(x=>eq(lv(x,LEAD_COL.PE),nm));
+      const i=ci(D.pe.h,'EmployeeName','name'); pe=_peAll.filter(x=>eq(v(x,i),nm));
+    }
+    if(!lead.length){
+      console.warn(`No Lead Tracker rows matched "${nm}" for role ${_user.role}. Check the name in Cred col A exactly matches the `+
+        (_user.role==='cluster'?'Cluster Head (col AE)':_user.role==='citymgr'?'City Manager (col AG)':'PE')+' column.');
     }
   }
   D.lead.r=lead; D.pe.r=pe;
@@ -788,6 +801,15 @@ function enterDashboard(){
   populatePEMRFilters(); populateVMRFilters(); populateHRCFilters();
   buildAll();
   applyTabVisibility();
+  // PE users land on their PE Monthly Report (calendar + summary)
+  if(_user.role==='pe'){
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+    const b=[...document.querySelectorAll('.tab')].find(x=>(x.getAttribute('onclick')||'').includes("'pemr'"));
+    if(b)b.classList.add('active');
+    document.getElementById('tab-pemr').classList.add('active');
+    buildPEMR();
+  }
   const roleLabel={admin:'Admin',cluster:'Cluster Head',citymgr:'City Manager',pe:'Project Engineer'}[_user.role]||_user.role;
   const chip=document.getElementById('user-chip');
   chip.innerHTML=`<i class="ti ti-user"></i> ${_user.name||_user.email} <span class="role">· ${roleLabel}</span>`;
@@ -2814,6 +2836,111 @@ function buildPEMR(){
       ${cells}
     </tr>`;
   }).join('');
+
+  // For a logged-in PE, render a detailed stylish summary below the calendar
+  if(_user && _user.role==='pe'){ renderPEMRPESummary(); }
+  else { const s=document.getElementById('pemr-pe-summary'); if(s)s.innerHTML=''; }
+}
+
+// Detailed PE summary shown below the PE Monthly calendar (for PE logins)
+function renderPEMRPESummary(){
+  const host=document.getElementById('pemr-pe-summary'); if(!host)return;
+  const ctx=_pemrCtx; if(!ctx||!ctx.attByPD){host.innerHTML='';return;}
+  const peName=(_user&&_user.name)||(ctx.peNames&&ctx.peNames[0])||'';
+  if(!peName){host.innerHTML='';return;}
+  const pids=ctx.peProjects[peName]||[];
+  const yy=ctx.yy,mm=ctx.mm;
+  const monthLabel=new Date(yy,mm-1,1).toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+  const daysInMonth=new Date(yy,mm,0).getDate();
+  const today=new Date();today.setHours(0,0,0,0);
+  let expectedDays;
+  if(yy>today.getFullYear()||(yy===today.getFullYear()&&(mm-1)>today.getMonth()))expectedDays=0;
+  else if(yy===today.getFullYear()&&(mm-1)===today.getMonth())expectedDays=Math.min(today.getDate(),daysInMonth);
+  else expectedDays=daysInMonth;
+  const leavesSet=(ctx.leavesByPE&&ctx.leavesByPE[peName])||new Set();
+  const pr=m2=>({'onsite visit':4,'without visit update':3,'no activity':2})[m2]||(m2?1:0);
+
+  let daysUpdated=0,projUpdates=0,tbtCnt=0,dprCnt=0,leaveCount=0;
+  const missed=[],leaveDates=[];
+  const projStats={}; pids.forEach(p=>projStats[p]={updated:0,onsite:0,without:0,noact:0,tbt:0,dpr:0,lastDk:null});
+  for(let dd=1;dd<=expectedDays;dd++){
+    const dk=yy+'-'+mm+'-'+dd;
+    if(leavesSet.has(dk)){leaveCount++;leaveDates.push(dd);continue;}
+    let anyToday=false;
+    pids.forEach(pid=>{
+      const key=pid+'|'+dk;
+      const arows=ctx.attByPD[key];
+      if(arows&&arows.length){
+        anyToday=true;projUpdates++;
+        const ps=projStats[pid];ps.updated++;ps.lastDk=dk;
+        let chosen=null,mNorm='';arows.forEach(r=>{const m2=v(r,ATT_COL.M).toLowerCase();if(!chosen||pr(m2)>pr(mNorm)){chosen=r;mNorm=m2;}});
+        if(mNorm==='onsite visit')ps.onsite++;else if(mNorm==='without visit update')ps.without++;else if(mNorm==='no activity')ps.noact++;
+      }
+      const t=ctx.tbtByPD[key];if(t){if(t.tbt){tbtCnt++;projStats[pid].tbt++;}if(t.dpr){dprCnt++;projStats[pid].dpr++;}}
+    });
+    if(anyToday)daysUpdated++; else missed.push(dd);
+  }
+  const effExpected=Math.max(0,expectedDays-leaveCount);
+  const total=pids.length;
+  const expectedProjUpdates=effExpected*total;
+  const attPct=effExpected?Math.round(daysUpdated/effExpected*100):0;
+  const updPct=expectedProjUpdates?Math.round(projUpdates/expectedProjUpdates*100):0;
+  const notUpdatedProjects=pids.filter(p=>projStats[p].updated===0).length;
+
+  const cards=
+    metric('ti-briefcase','Total Projects',total,'Assigned to you','#4f8ef7')+
+    metric('ti-calendar','Expected Days',effExpected,`${expectedDays} elapsed − ${leaveCount} leave · ${monthLabel}`,'#9b6dff')+
+    metricWithBar('ti-calendar-check','Days Updated',daysUpdated,`${attPct}% of expected days`,'#34c98a',attPct,'#34c98a')+
+    metricWithBar('ti-calendar-x','Days Not Updated',missed.length,`${effExpected?Math.round(missed.length/effExpected*100):0}% of expected days`,'#e74c3c',effExpected?missed.length/effExpected*100:0,'#e74c3c')+
+    metric('ti-beach','Total Leave Days',leaveCount,leaveCount?'Approved leaves':'No leaves','#3bc0d8')+
+    metricWithBar('ti-checklist','Project Updates',projUpdates,`of ${expectedProjUpdates} expected · ${updPct}%`,'#f5a623',updPct,'#f5a623')+
+    metric('ti-clipboard-check','TBT Updated',tbtCnt,`of ${expectedProjUpdates} expected`,'#34c98a')+
+    metric('ti-file-report','DPR Updated',dprCnt,`of ${expectedProjUpdates} expected`,'#3bc0d8');
+
+  // Project-wise table
+  const projRows=pids.map(pid=>{
+    const ps=projStats[pid];
+    const nm=ctx.projName[pid]||pid;
+    const lastDk=ps.lastDk?(()=>{const [a,b,c]=ps.lastDk.split('-').map(Number);return new Date(a,b-1,c).toLocaleDateString('en-IN',{day:'2-digit',month:'short'});})():'—';
+    let statusBadge;
+    if(ps.updated===0)statusBadge='<span class="badge br">Never updated</span>';
+    else if(effExpected&&ps.updated>=effExpected)statusBadge='<span class="badge bg">Up to date</span>';
+    else statusBadge='<span class="badge bo">Partial</span>';
+    const escPid=String(pid).replace(/'/g,"\\'");
+    return {nm,pid,ps,lastDk,statusBadge,escPid};
+  }).sort((a,b)=>b.ps.updated-a.ps.updated||a.nm.localeCompare(b.nm));
+  const projTableRows=projRows.map((r,i)=>`<tr>
+      <td style="color:var(--muted);">${i+1}</td>
+      <td style="font-weight:500;">${pemrEsc(r.nm)}<div style="font-size:9px;color:var(--muted);">${pemrEsc(r.pid)}</div></td>
+      <td style="text-align:right;color:#34c98a;font-weight:600;">${r.ps.updated}</td>
+      <td style="text-align:center;">${r.ps.onsite||'—'}</td>
+      <td style="text-align:center;">${r.ps.without||'—'}</td>
+      <td style="text-align:center;">${r.ps.noact||'—'}</td>
+      <td style="text-align:center;">${r.ps.tbt||'—'}</td>
+      <td style="text-align:center;">${r.ps.dpr||'—'}</td>
+      <td style="font-size:11px;white-space:nowrap;">${r.lastDk}</td>
+      <td>${r.statusBadge}</td>
+    </tr>`).join('');
+  const projTable=pids.length?`<div class="table-wrap" style="overflow:auto;"><table style="font-size:12px;">
+    <thead><tr><th>#</th><th>Project</th><th style="text-align:right;">Days Updated</th><th style="text-align:center;">Onsite</th><th style="text-align:center;">Without Visit</th><th style="text-align:center;">No Activity</th><th style="text-align:center;">TBT</th><th style="text-align:center;">DPR</th><th>Last Update</th><th>Status</th></tr></thead>
+    <tbody>${projTableRows}</tbody>
+  </table></div>`:'<div class="empty">No projects assigned.</div>';
+
+  const wd=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const missedChips=missed.map(dd=>{const dt=new Date(yy,mm-1,dd);return `<span style="font-size:11px;background:rgba(231,76,60,.14);color:#ff7a6b;border:1px solid rgba(231,76,60,.3);border-radius:6px;padding:3px 8px;">${dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})} · ${wd[dt.getDay()]}</span>`;}).join('');
+  const leaveChips=leaveDates.map(dd=>{const dt=new Date(yy,mm-1,dd);return `<span style="font-size:11px;background:rgba(56,178,210,.14);color:#3bc0d8;border:1px solid rgba(56,178,210,.3);border-radius:6px;padding:3px 8px;">${dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})} · ${wd[dt.getDay()]}</span>`;}).join('');
+
+  const sect=(icon,title,inner)=>`<div class="card"><div class="card-title"><i class="ti ${icon}"></i> ${title}</div>${inner}</div>`;
+
+  host.innerHTML=`
+    <div class="section-title" style="margin-top:22px;">My Monthly Summary · ${pemrEsc(peName)} · ${monthLabel}</div>
+    <div class="metrics">${cards}</div>
+    ${sect('ti-list-details','Project-wise Activity',projTable)}
+    ${sect('ti-calendar-x',`Days Not Updated (${missed.length})`, missed.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;">${missedChips}</div>`:(effExpected?`<div style="font-size:12px;color:#34c98a;">✓ All ${effExpected} expected day(s) updated.</div>`:'<div class="empty" style="padding:14px;">No expected days yet.</div>'))}
+    ${sect('ti-alert-triangle',`Projects Never Updated (${notUpdatedProjects})`, notUpdatedProjects?`<div style="display:flex;flex-wrap:wrap;gap:6px;">${projRows.filter(r=>r.ps.updated===0).map(r=>`<span style="font-size:11px;background:rgba(245,166,35,.14);color:#f5a623;border:1px solid rgba(245,166,35,.3);border-radius:6px;padding:3px 10px;">${pemrEsc(r.nm)}</span>`).join('')}</div>`:'<div style="font-size:12px;color:#34c98a;">✓ Every assigned project has at least one update this month.</div>')}
+    ${sect('ti-beach',`Leave Summary (${leaveCount})`, leaveDates.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;">${leaveChips}</div>`:'<div class="empty" style="padding:14px;">No leave days recorded this month.</div>')}
+    <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px;">Expected = ${effExpected} day(s) (${expectedDays} elapsed − ${leaveCount} leave) × ${total} project(s). Leave dates are excluded from expected. Click any calendar cell above for that day's project detail.</div>
+  `;
 }
 
 // ── VENDOR MONTHLY REPORT ─────────────────────────────────────
