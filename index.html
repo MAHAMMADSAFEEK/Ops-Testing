@@ -2524,7 +2524,7 @@ function pemrShowDay(peName,dk){
     <span>Total Projects: <b style="color:var(--text);">${pids.length}</b></span>
     <span>Activity updated: <b style="color:#34c98a;">${marked}</b></span>
     <span>Not marked: <b style="color:#e74c3c;">${pids.length-marked}</b></span>
-    ${onLeave?'<span class="badge bb" style="margin-left:auto;">🏖 On Leave</span>':''}
+    ${onLeave?`<span class="badge bb" style="margin-left:auto;">🏖 ${ctx.leavesByPE[peName].get(dk)||'Leave'}</span>`:''}
   </div>`;
 
   let ov=document.getElementById('pemr-modal-ov');
@@ -2717,7 +2717,7 @@ function buildPEMR(){
   const fCity=_pemrMS.city,fCluster=_pemrMS.cluster,fCityMgr=_pemrMS.citymgr,fPE=_pemrMS.pe;
   const head=document.getElementById('pemr-head'),body=document.getElementById('pemr-body'),legend=document.getElementById('pemr-legend');
   if(legend)legend.innerHTML=[
-    ['pmr-green','All projects updated'],['pmr-orange','Partially updated'],['pmr-red','Absent (no update)'],['pmr-teal','On Leave'],['pmr-grey','Future / no day']
+    ['pmr-green','All projects updated'],['pmr-orange','Partially updated'],['pmr-red','Absent (no update)'],['pmr-teal','Leave / Week-Off'],['pmr-grey','Future / no day']
   ].map(([c,t])=>`<span class="lg"><span class="sw ${c}"></span>${t}</span>`).join('')+
     '<span class="lg" style="margin-left:auto;">Cell = projects updated / total · TBT/DPR ✓ if any report that day</span>';
 
@@ -2788,18 +2788,29 @@ function buildPEMR(){
     return true;
   }).sort((a,b)=>a.localeCompare(b));
 
-  // Leaves index: PE name -> Set of date keys (this month).
-  // Daily Activity: A(0)=email, B(1)=date, C(2)=type ("Leave")
+  // Off-days index: PE name -> Map of dateKey -> 'Leave' | 'Week-Off' (this month).
+  // Daily Activity sheet: A(0)=Name (was email), B(1)=Task Date, C(2)=Day Status ("Leave"/"Week-Off").
   const peEmailIdx=ci(D.pe.h,'email','mail');
   const emailToPE={};
   if(peEmailIdx>=0)D.pe.r.forEach(x=>{const em=v(x,peEmailIdx).toLowerCase().trim(),nm=v(x,1);if(em&&nm)emailToPE[em]=nm;});
+  // Canonical PE-name lookup (case-insensitive) so Daily Activity names map to the master spelling
+  const peNameCanon={};
+  allPEs.forEach(n=>{const k=String(n).trim().toLowerCase();if(k)peNameCanon[k]=n;});
+  const resolveDailyName=(raw)=>{
+    raw=String(raw||'').trim(); if(!raw)return '';
+    if(raw.includes('@'))return emailToPE[raw.toLowerCase()]||'';   // backward-compat if an email is still used
+    return peNameCanon[raw.toLowerCase()]||raw;                      // column A is a name now
+  };
   const leavesByPE={};
   D.daily.r.forEach(x=>{
-    if(String(v(x,2)).toLowerCase().trim()!=='leave')return;
-    const em=v(x,0).toLowerCase().trim(),d=parseDate(v(x,1));
-    if(!em||!d||d.getFullYear()!==yy||d.getMonth()!==mm-1)return;
-    const nm=emailToPE[em];if(!nm)return;
-    (leavesByPE[nm]=leavesByPE[nm]||new Set()).add(pmrKey(d));
+    const st=String(v(x,2)).toLowerCase().trim();
+    const isLeave=(st==='leave');
+    const isOff=(st==='week-off'||st==='weekoff'||st==='week off'||st==='weekly off'||st==='off');
+    if(!isLeave&&!isOff)return;                 // only Leave / Week-Off count as off-days
+    const d=parseDate(v(x,1));
+    if(!d||d.getFullYear()!==yy||d.getMonth()!==mm-1)return;
+    const nm=resolveDailyName(v(x,0)); if(!nm)return;
+    (leavesByPE[nm]=leavesByPE[nm]||new Map()).set(pmrKey(d), isOff?'Week-Off':'Leave');
   });
 
   // Cluster Head / City Manager maps from PE Master (header-matched)
@@ -2833,7 +2844,7 @@ function buildPEMR(){
       });
       let cls,label;
       if(updated===0){
-        if(onLeave){cls='pmr-teal';label='Leave';}
+        if(onLeave){cls='pmr-teal';label=(leavesByPE[pe].get(dk)||'Leave');}
         else{cls=future?'pmr-grey':'pmr-red';label=future?'—':'Absent';}
       } else{cls=(updated>=total)?'pmr-green':'pmr-orange';label=`${updated}/${total} updated`;}
       const tags=(updated>0)?`<div class="pmr-tags"><span class="pmr-tg ${tbt?'pmr-green':'pmr-red'}">TBT ${tbt?'✓':'—'}</span><span class="pmr-tg ${dpr?'pmr-green':'pmr-red'}">DPR ${dpr?'✓':'—'}</span></div>`:'';
