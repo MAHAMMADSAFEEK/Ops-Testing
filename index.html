@@ -1613,11 +1613,14 @@ function clearPOVFilters(){
 }
 
 function computeProjectMetrics(projId){
-  if(!projId)return{dprCount:0,startDate:null,endDate:null,tat:null,finalStage:'—',weightedPct:0,status:'pending',lastDate:null};
+  if(!projId)return{dprCount:0,attCount:0,startDate:null,endDate:null,tat:null,finalStage:'—',weightedPct:0,status:'pending',lastDate:null,lastAttDate:null,lastActivity:null,activityCount:0};
   if(_povCache[projId])return _povCache[projId];
   const ah=D.att.h,ar=D.att.r;
-  const A_UID=ci(ah,'UniqueID','unique id'),A_PID=ci(ah,'ProjectID','project id');
-  const uniqueIds=new Set(ar.filter(x=>v(x,A_PID)===projId).map(x=>v(x,A_UID)).filter(Boolean));
+  const A_UID=ci(ah,'UniqueID','unique id'),A_PID=ci(ah,'ProjectID','project id'),A_DATE=ci(ah,'Date');
+  const attRows=ar.filter(x=>v(x,A_PID)===projId);
+  const uniqueIds=new Set(attRows.map(x=>v(x,A_UID)).filter(Boolean));
+  const attDatesArr=attRows.map(x=>parseDate(v(x,A_DATE))).filter(Boolean).sort((a,b)=>a-b);
+  const lastAttDate=attDatesArr.length?attDatesArr[attDatesArr.length-1]:null;
   const dh=D.dpr.h,dr=D.dpr.r;
   const D_CID=ci(dh,'ChildID','child'),D_PLAN=ci(dh,'WorkPlan','plan','work'),D_TASK=ci(dh,'CompletedTask','completed task'),D_PCT=ci(dh,'%','completion','percent'),D_TS=ci(dh,'Timestamp','time'),D_UID=ci(dh,'UniqueID','unique');
   const dprRows=dr.filter(x=>{const uid=v(x,D_UID),cid=v(x,D_CID);return uniqueIds.has(uid)||cid.startsWith(projId);});
@@ -1653,7 +1656,11 @@ function computeProjectMetrics(projId){
   if(!dprRows.length)status='pending';
   else if(weightedPct>=100)status='done';
   else status='wip';
-  const res={dprCount:dprRows.length,startDate,endDate,tat,finalStage,lastStatus,weightedPct,status,lastDate};
+  // Aging report now counts Attendance Tracker activity (Onsite / Without Visit / No Activity all count as "updated").
+  // lastActivity = most recent of latest attendance date and latest DPR date.
+  const lastActivity=[lastAttDate,lastDate].filter(Boolean).sort((a,b)=>b-a)[0]||null;
+  const activityCount=attRows.length+dprRows.length;
+  const res={dprCount:dprRows.length,attCount:attRows.length,startDate,endDate,tat,finalStage,lastStatus,weightedPct,status,lastDate,lastAttDate,lastActivity,activityCount};
   _povCache[projId]=res;
   return res;
 }
@@ -1694,7 +1701,7 @@ function povDelayReport({upNever,upOk,up7,up15,up30,totalProjects}){
   const banner=active
     ? `<div style="margin-bottom:12px;padding:10px 12px;background:rgba(79,142,247,0.12);border:1px solid rgba(79,142,247,0.35);border-radius:8px;font-size:12px;color:var(--text);display:flex;justify-content:space-between;align-items:center;gap:8px;"><div><i class="ti ti-filter" style="margin-right:6px;color:var(--accent);"></i>Filtering tab by update bucket. Click again or use <strong>Clear</strong> to reset.</div><button onclick="clearPOVDelayBucket()" style="background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">Clear</button></div>`
     : `<div style="margin-bottom:12px;padding:10px 12px;background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.25);border-radius:8px;font-size:12px;color:var(--text);">
-        <strong style="color:#e74c3c;">${delayed}</strong> project${delayed===1?'':'s'} delayed — no DPR update in 7+ days${upNever?`, and <strong style="color:#8b92b0;">${upNever}</strong> never updated`:''}. <span style="color:var(--muted);">Click a row to filter the tab.</span>
+        <strong style="color:#e74c3c;">${delayed}</strong> project${delayed===1?'':'s'} delayed — no activity update in 7+ days${upNever?`, and <strong style="color:#8b92b0;">${upNever}</strong> never updated`:''}. <span style="color:var(--muted);">Click a row to filter the tab.</span>
       </div>`;
   return banner+`<table style="font-size:12px;width:100%;">
     <tbody>
@@ -1702,7 +1709,7 @@ function povDelayReport({upNever,upOk,up7,up15,up30,totalProjects}){
       ${line('up15','#f5a623','ti-alert-triangle','Delayed — no update 15–29 days',up15)}
       ${line('up7','#f5a623','ti-clock-exclamation','Delayed — no update 7–14 days',up7)}
       ${line('upOk','#34c98a','ti-circle-check','Up to date — updated within 7 days',upOk)}
-      ${line('upNever','#8b92b0','ti-clock-off','Never updated (no DPR yet)',upNever)}
+      ${line('upNever','#8b92b0','ti-clock-off','Never updated (no attendance or DPR yet)',upNever)}
     </tbody>
   </table>`;
 }
@@ -1720,7 +1727,7 @@ function buildPOV(){
     return true;
   });
   const today=new Date();today.setHours(0,0,0,0);
-  const bucketOf=(x)=>{const m=computeProjectMetrics(lv(x,LEAD_COL.PID));if(!m.dprCount||!m.lastDate)return'upNever';const days=Math.floor((today-m.lastDate)/(1000*60*60*24));if(days>=30)return'up30';if(days>=15)return'up15';if(days>=7)return'up7';return'upOk';};
+  const bucketOf=(x)=>{const m=computeProjectMetrics(lv(x,LEAD_COL.PID));if(!m.activityCount||!m.lastActivity)return'upNever';const days=Math.floor((today-m.lastActivity)/(1000*60*60*24));if(days>=30)return'up30';if(days>=15)return'up15';if(days>=7)return'up7';return'upOk';};
   let upNever=0,upOk=0,up7=0,up15=0,up30=0;
   baseRows.forEach(x=>{const b=bucketOf(x);if(b==='upNever')upNever++;else if(b==='up30')up30++;else if(b==='up15')up15++;else if(b==='up7')up7++;else upOk++;});
   const rows=_povDelayBucket?baseRows.filter(x=>bucketOf(x)===_povDelayBucket):baseRows;
